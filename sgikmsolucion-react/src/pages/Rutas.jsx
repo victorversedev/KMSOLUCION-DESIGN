@@ -4,7 +4,7 @@ import {
   FiSearch, FiExternalLink, FiEdit, FiTrash2, 
   FiChevronDown, FiChevronRight, FiPlus, FiX 
 } from "react-icons/fi";
-import "./rutas.css";
+import "./Rutas.css";
 
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
