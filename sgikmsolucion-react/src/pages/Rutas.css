@@ -1,0 +1,347 @@
+/* =========================================
+   LAYOUT GENERAL
+   ========================================= */
+.layout-container {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.content-area {
+  padding: 24px;
+  flex: 1;
+  overflow-y: auto;
+  background-color: #f1f3f5;
+}
+
+/* =========================================
+   HEADER & ACCIONES
+   ========================================= */
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.table-header h2 {
+  font-size: 1.5rem;
+  color: #212529;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 14px;
+  color: #adb5bd;
+  font-size: 1.1rem;
+  z-index: 1;
+}
+
+.search-box input {
+  width: 320px;
+  height: 42px;
+  padding: 0 15px 0 42px;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  outline: none;
+  font-size: 14px;
+  background-color: white;
+  transition: all 0.2s ease;
+}
+
+.search-box input:focus {
+  border-color: #1b5e20;
+  box-shadow: 0 0 0 3px rgba(27, 94, 32, 0.1);
+}
+
+.btn-insert {
+  background-color: #1b5e20;
+  color: white;
+  height: 42px;
+  padding: 0 20px;
+  border-radius: 10px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-insert:hover {
+  background-color: #144618;
+  transform: translateY(-1px);
+}
+
+/* =========================================
+   TABLA Y ACORDEÓN
+   ========================================= */
+.table-wrapper {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.custom-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.custom-table th {
+  background-color: #f8f9fa;
+  padding: 16px;
+  text-align: left;
+  color: #495057;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid #f1f3f5;
+}
+
+.custom-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f3f5;
+  color: #495057;
+  font-size: 14px;
+}
+
+.row-client {
+  cursor: pointer;
+  background-color: #ffffff;
+  transition: background 0.2s;
+}
+
+.row-client:hover {
+  background-color: #f8f9fa;
+}
+
+.badge-cliente {
+  background: #e8f5e9;
+  color: #1b5e20;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  margin-right: 8px;
+}
+
+.enlaces-count {
+  color: #949a9f;
+  font-size: 12px;
+}
+
+.row-detail {
+  background-color: #fdfdfd;
+}
+
+.row-detail:hover {
+  background-color: #f1f8f1;
+}
+
+.enlace-name {
+  padding-left: 48px !important;
+  font-weight: 600;
+  color: #212529;
+}
+
+.link {
+  color: #007bff;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-icon {
+  background: #f8f9fa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.btn-icon.edit:hover { background: #e8f5e9; color: #28a745; border-color: #28a745; }
+.btn-icon.delete:hover { background: #fff5f5; color: #dc3545; border-color: #dc3545; }
+
+/* =========================================
+   MODAL MEJORADO
+   ========================================= */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #ffffff; /* Fondo completamente blanco y sólido */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999; /* Un valor muy alto para que tape también el SideMenu verde */
+  animation: fadeIn 0.25s ease-out;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #ffffff !important; /* El !important fuerza el blanco sólido */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 99999 !important; /* Lo empuja por encima de tu menú verde */
+  animation: fadeIn 0.25s ease-out;
+}
+
+.modal-content {
+  background-color: #ffffff;
+  width: 90%;
+  max-width: 500px;
+  border-radius: 16px;
+  border: none !important; /* Forzamos a que no haya líneas */
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08); 
+  overflow: hidden;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #212529;
+  font-weight: 700;
+}
+
+.close-modal {
+  background: #f8f9fa;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #adb5bd;
+  transition: all 0.2s;
+}
+
+.close-modal:hover {
+  background: #ffe3e3;
+  color: #e03131;
+}
+
+.insert-form {
+  padding: 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6c757d;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.form-group input, 
+.form-group textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.form-group input:focus, 
+.form-group textarea:focus {
+  outline: none;
+  border-color: #1b5e20;
+  background-color: #fff;
+  box-shadow: 0 0 0 4px rgba(27, 94, 32, 0.08);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.btn-cancel {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  color: #495057;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-save {
+  background: #1b5e20;
+  color: white;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-save:hover {
+  background: #144618;
+  box-shadow: 0 4px 12px rgba(27, 94, 32, 0.2);
+}
+
+/* Animaciones */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { 
+  from { transform: translateY(30px); opacity: 0; } 
+  to { transform: translateY(0); opacity: 1; } 
+}

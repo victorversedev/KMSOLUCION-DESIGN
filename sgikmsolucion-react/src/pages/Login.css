@@ -1,0 +1,92 @@
+/* Fondo con gradiente suave */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(135deg, #f4f6f8, #e9ecef);
+}
+
+/* Tarjeta estilo SaaS */
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #ffffff;
+  padding: 40px 32px;
+  border-radius: 18px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+}
+
+/* Logo */
+.login-logo {
+  width: 220px;
+  height: auto;
+  margin-bottom: 18px;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Título */
+.login-card h1 {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 28px;
+  color: #1f2937;
+}
+
+/* Grupo input */
+.form-group {
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+/* Label */
+label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  display: block;
+  color: #374151;
+}
+
+/* Inputs modernos */
+input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+input:focus {
+  border-color: #276b39;
+  box-shadow: 0 0 0 3px rgba(39, 107, 57, 0.15);
+}
+
+/* Botón principal */
+button {
+  width: 100%;
+  margin-top: 20px;
+  background: linear-gradient(135deg, #276b39, #1f5c31);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  height: 48px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(39, 107, 57, 0.35);
+}
+
+button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
