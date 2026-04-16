@@ -9,15 +9,13 @@ import "./Ingresos.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-// URL de la API de Laravel para Ingresos
-const API_URL = "https://kmsolucion.com/KMBD/public/api/ingresos";
+const BASE_URL = "https://kmsolucion.com/KMBD/public/api/";
 
 export default function Ingresos() {
   const [data, setData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedClients, setExpandedClients] = useState({});
   const csvInputRef = useRef(null);
-
 
   const getAuthHeader = () => {
     const token = localStorage.getItem("token");
@@ -37,12 +35,24 @@ export default function Ingresos() {
     categoria: "",
     fecha_pag: "", 
     monto: "", 
-    estado: "Completado"
+    estado: "Ingreso"
   });
+
+  const formatExcelDate = (dateString) => {
+    if (!dateString) return new Date().toISOString().split('T')[0];
+    const str = String(dateString).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mxDateMatch) {
+      return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
+    }
+    const d = new Date(str);
+    return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
+  };
 
   const fetchRecords = async () => {
     try {
-      const response = await axios.get(API_URL, getAuthHeader());
+      const response = await axios.get(`${BASE_URL}/ingresos`, getAuthHeader());
       const grouped = response.data.reduce((acc, curr) => {
         const clientName = curr.client_name.toUpperCase();
         if (!acc[clientName]) acc[clientName] = { cliente: clientName, items: [] };
@@ -60,7 +70,6 @@ export default function Ingresos() {
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos de Ingresos:", error);
-      if (error.response?.status === 401) alert("Tu sesión ha expirado.");
     }
   };
 
@@ -77,6 +86,7 @@ export default function Ingresos() {
     setFormEntry({ ...formEntry, [name]: value });
   };
 
+  // --- LÓGICA DE IMPORTACIÓN Y REPARTO CORREGIDA ---
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -88,43 +98,58 @@ export default function Ingresos() {
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
-
-          const formatExcelDate = (dateString) => {
-            if (!dateString) return new Date().toISOString().split('T')[0];
-            const str = dateString.trim();
-            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-            const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (mxDateMatch) return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
-            const d = new Date(str);
-            return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
-          };
+          const today = new Date();
 
           const uploadPromises = validRows.map(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
+            const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
             
-            return axios.post(API_URL, {
+            let targetEndpoint = "";
+            let finalStatus = "";
+
+            // 1. Determinar Destino
+            if (rawStatus === "aprobado" || rawStatus === "aprobada" || rawStatus === "pagado" || rawStatus === "completado") {
+              targetEndpoint = `${BASE_URL}/ingresos`;
+              finalStatus = "Ingreso";
+            } else {
+              targetEndpoint = `${BASE_URL}/cxc`;
+              const formattedDate = formatExcelDate(row.fecha || row.fechapag);
+              const invoiceDate = new Date(formattedDate);
+              const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
+              finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
+            }
+
+            // 2. Construir Payload base
+            const payload = {
               client_name: (row.cliente || "SIN CLIENTE").trim(),
               folio: (row.folio || "S/N").trim(),
               category: (row.categoria || row.category || "General").trim(),
-              payment_date: formatExcelDate(row.fechapag || row.fecha || row.paymentdate),
               amount: parseFloat(cleanMonto),
-              status: (row.estado || "Completado").trim()
-            }, getAuthHeader());
+              status: finalStatus
+            };
+
+            // 3. Asignar llave de fecha según el destino (EVITA EL ERROR DE REPARTO)
+            if (targetEndpoint.includes("/ingresos")) {
+              payload.payment_date = formatExcelDate(row.fecha || row.fechapag);
+            } else {
+              payload.due_date = formatExcelDate(row.fechaven || row.fecha || row.duedate);
+            }
+
+            return axios.post(targetEndpoint, payload, getAuthHeader());
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Ingresos importados con éxito!");
+          alert("¡Reparto completado exitosamente!");
           fetchRecords();
         } catch (error) {
-          console.error("Error al importar CSV de Ingresos:", error);
-          alert("Hubo un error de permisos o sesión.");
+          console.error("Error detallado:", error.response?.data);
+          alert("Error al repartir. Verifica que los campos en Laravel coincidan.");
         } finally {
-          if(csvInputRef.current) csvInputRef.current.value = "";
+          if (csvInputRef.current) csvInputRef.current.value = "";
         }
       }
     });
   };
-
 
   const handleEditClick = (e, item, clienteName) => {
     e.stopPropagation();
@@ -143,7 +168,7 @@ export default function Ingresos() {
   const handleUpdate = async (e) => {
     e.preventDefault();
     try {
-      await axios.put(`${API_URL}/${editingId}`, {
+      await axios.put(`${BASE_URL}/ingresos/${editingId}`, {
         client_name: formEntry.cliente,
         folio: formEntry.folio,
         category: formEntry.categoria,
@@ -154,27 +179,27 @@ export default function Ingresos() {
       setIsModalOpen(false);
       fetchRecords();
     } catch (error) {
-      alert("Error al actualizar el ingreso. Revisa tus permisos.");
+      alert("Error al actualizar el ingreso.");
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm("¿Estás seguro de eliminar este registro de ingreso?")) {
+    if (window.confirm("¿Eliminar este registro?")) {
       try {
-        await axios.delete(`${API_URL}/${id}`, getAuthHeader());
+        await axios.delete(`${BASE_URL}/ingresos/${id}`, getAuthHeader());
         fetchRecords();
       } catch (error) {
-        console.error("Error al eliminar:", error);
-        alert("No se pudo eliminar el registro.");
+        alert("No se pudo eliminar.");
       }
     }
   };
 
   const filteredData = data.filter((group) => {
-    const matchesCliente = group.cliente.toLowerCase().includes(searchTerm.toLowerCase());
+    const search = searchTerm.toLowerCase();
+    const matchesCliente = group.cliente.toLowerCase().includes(search);
     const matchesItems = group.items.some(item => 
-      item.folio.toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
+      item.folio.toString().toLowerCase().includes(search) ||
+      (item.category && item.category.toLowerCase().includes(search))
     );
     return matchesCliente || matchesItems;
   });
@@ -191,15 +216,10 @@ export default function Ingresos() {
               <div className="header-actions">
                 <div className="search-box">
                   <FiSearch className="search-icon" />
-                  <input type="text" placeholder="Buscar folio o categoría..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
-                
                 <input type="file" accept=".csv" style={{ display: "none" }} ref={csvInputRef} onChange={handleCSVUpload} />
-                <button 
-                  className="btn-insert" 
-                  style={{ backgroundColor: "#1b5e20" }} 
-                  onClick={() => csvInputRef.current.click()}
-                >
+                <button className="btn-insert" style={{ backgroundColor: "#1b5e20" }} onClick={() => csvInputRef.current.click()}>
                   <FiDownload /> Importar CSV
                 </button>
               </div>
@@ -209,13 +229,13 @@ export default function Ingresos() {
               <table className="custom-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "50px" }}></th>
+                    <th></th>
                     <th>Folio / Cliente</th>
                     <th>Categoría</th>
                     <th>Fecha de Pago</th>
                     <th>Monto</th>
                     <th>Estado</th>
-                    <th style={{ width: "120px" }}>Acciones</th>
+                    <th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,23 +247,19 @@ export default function Ingresos() {
                           <span className="badge-cliente">{group.cliente}</span>
                           <small>({group.items.length})</small>
                         </td>
-                        <td className="actions"></td>
+                        <td></td>
                       </tr>
                       {expandedClients[group.cliente] && group.items.map((item) => (
                         <tr key={item.id} className="row-detail">
                           <td></td>
                           <td className="enlace-name">{item.folio}</td>
-                          <td style={{ color: "#666", fontSize: "0.9rem" }}>{item.category}</td>
+                          <td>{item.category}</td>
                           <td>{item.fecha_pag}</td>
                           <td style={{ fontWeight: "600" }}>${item.monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                          <td><span className={`status-pill ${item.estado.toLowerCase()}`}>{item.estado}</span></td>
+                          <td><span className={`status-pill ${item.estado.toLowerCase().replace(" ", "-")}`}>{item.estado}</span></td>
                           <td className="actions">
-                            <button className="btn-icon edit" title="Editar" onClick={(e) => handleEditClick(e, item, group.cliente)}>
-                              <FiEdit />
-                            </button>
-                            <button className="btn-icon delete" title="Eliminar" onClick={() => handleDelete(item.id)}>
-                              <FiTrash2 />
-                            </button>
+                            <button className="btn-icon edit" onClick={(e) => handleEditClick(e, item, group.cliente)}><FiEdit /></button>
+                            <button className="btn-icon delete" onClick={() => handleDelete(item.id)}><FiTrash2 /></button>
                           </td>
                         </tr>
                       ))}
@@ -258,16 +274,12 @@ export default function Ingresos() {
 
       {isModalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{maxWidth: '500px'}}>
+          <div className="modal-content">
             <div className="modal-header">
               <h3>Editar Ingreso</h3>
               <button className="close-modal" onClick={() => setIsModalOpen(false)}><FiX /></button>
             </div>
             <form onSubmit={handleUpdate} className="insert-form">
-              <div className="form-group">
-                <label>Nombre del Cliente</label>
-                <input name="cliente" required value={formEntry.cliente} onChange={handleInputChange} disabled />
-              </div>
               <div className="form-group">
                 <label>Folio</label>
                 <input name="folio" required value={formEntry.folio} onChange={handleInputChange} />
@@ -287,9 +299,9 @@ export default function Ingresos() {
               <div className="form-group">
                 <label>Estado</label>
                 <select name="estado" value={formEntry.estado} onChange={handleInputChange}>
-                  <option value="Completado">Completado</option>
+                  <option value="Ingreso">Ingreso</option>
                   <option value="Pendiente">Pendiente</option>
-                  <option value="Cancelado">Cancelado</option>
+                  <option value="Cartera Vencida">Cartera Vencida</option>
                 </select>
               </div>
               <div className="form-actions">

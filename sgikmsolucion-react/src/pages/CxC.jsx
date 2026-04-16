@@ -9,7 +9,6 @@ import "./CxC.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-// URL de la API de Laravel para CxC
 const API_URL = "https://kmsolucion.com/KMBD/public/api/cxc";
 
 export default function CxC() {
@@ -39,6 +38,19 @@ export default function CxC() {
     estado: "Pendiente"
   });
 
+  // --- FUNCIÓN DE FECHA (Indispensable para que no de error) ---
+  const formatExcelDate = (dateString) => {
+    if (!dateString) return new Date().toISOString().split('T')[0];
+    const str = String(dateString).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mxDateMatch) {
+      return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
+    }
+    const d = new Date(str);
+    return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
+  };
+
   const fetchRecords = async () => {
     try {
       const response = await axios.get(API_URL, getAuthHeader());
@@ -59,7 +71,6 @@ export default function CxC() {
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos de CxC:", error);
-      if (error.response?.status === 401) alert("Sesión expirada. Por favor, vuelve a entrar.");
     }
   };
 
@@ -76,6 +87,7 @@ export default function CxC() {
     setFormEntry({ ...formEntry, [name]: value });
   };
 
+  // --- LÓGICA DE REPARTO COMPARTIDA ---
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -87,38 +99,54 @@ export default function CxC() {
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
-
-          const formatExcelDate = (dateString) => {
-            if (!dateString) return new Date().toISOString().split('T')[0];
-            const str = dateString.trim();
-            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-            const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (mxDateMatch) return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
-            const d = new Date(str);
-            return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
-          };
+          const today = new Date();
+          const BASE_URL = "https://kmsolucion.com/KMBD/public/api/";
 
           const uploadPromises = validRows.map(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
+            const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
             
-            return axios.post(API_URL, {
+            let targetEndpoint = "";
+            let finalStatus = "";
+            
+            // Clasificación
+            if (rawStatus === "aprobado" || rawStatus === "aprobada" || rawStatus === "pagado" || rawStatus === "completado") {
+              targetEndpoint = `${BASE_URL}/ingresos`;
+              finalStatus = "Ingreso";
+            } else {
+              targetEndpoint = `${BASE_URL}/cxc`;
+              const formattedDate = formatExcelDate(row.fecha || row.fechapag);
+              const invoiceDate = new Date(formattedDate);
+              const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
+              finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
+            }
+
+            const payload = {
               client_name: (row.cliente || "SIN CLIENTE").trim(),
               folio: (row.folio || "S/N").trim(),
               category: (row.categoria || row.category || "General").trim(),
-              due_date: formatExcelDate(row.fechaven || row.fecha || row.duedate),
               amount: parseFloat(cleanMonto),
-              status: (row.estado || "Pendiente").trim()
-            }, getAuthHeader());
+              status: finalStatus
+            };
+
+            // Diferenciación de campos para Laravel
+            if (targetEndpoint.includes("/ingresos")) {
+              payload.payment_date = formatExcelDate(row.fecha || row.fechapag);
+            } else {
+              payload.due_date = formatExcelDate(row.fechaven || row.fecha || row.duedate);
+            }
+
+            return axios.post(targetEndpoint, payload, getAuthHeader());
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Datos de CxC importados con éxito!");
+          alert("¡Importación y reparto exitoso!");
           fetchRecords();
         } catch (error) {
-          console.error("Error al importar CSV:", error);
-          alert("No se pudo importar. Revisa tu sesión o permisos.");
+          console.error("Error al repartir:", error.response?.data || error.message);
+          alert("Error en el envío. Revisa la consola.");
         } finally {
-          if(csvInputRef.current) csvInputRef.current.value = "";
+          if (csvInputRef.current) csvInputRef.current.value = "";
         }
       }
     });
@@ -152,18 +180,17 @@ export default function CxC() {
       setIsModalOpen(false);
       fetchRecords();
     } catch (error) {
-      alert("Error al actualizar el registro. Verifica tu sesión.");
+      alert("Error al actualizar.");
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm("¿Estás seguro de eliminar este registro de CxC?")) {
+    if (window.confirm("¿Eliminar este registro de CxC?")) {
       try {
         await axios.delete(`${API_URL}/${id}`, getAuthHeader());
         fetchRecords();
       } catch (error) {
-        console.error("Error al eliminar:", error);
-        alert("No se pudo eliminar el registro.");
+        alert("No se pudo eliminar.");
       }
     }
   };
@@ -171,7 +198,7 @@ export default function CxC() {
   const filteredData = data.filter((group) => {
     const matchesCliente = group.cliente.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesItems = group.items.some(item => 
-      (item.folio && item.folio.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.folio && String(item.folio).toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
     );
     return matchesCliente || matchesItems;
@@ -189,15 +216,10 @@ export default function CxC() {
               <div className="header-actions">
                 <div className="search-box">
                   <FiSearch className="search-icon" />
-                  <input type="text" placeholder="Buscar folio o categoría..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
-                
                 <input type="file" accept=".csv" style={{ display: "none" }} ref={csvInputRef} onChange={handleCSVUpload} />
-                <button 
-                  className="btn-insert" 
-                  style={{ backgroundColor: "#1b5e20" }} 
-                  onClick={() => csvInputRef.current.click()}
-                >
+                <button className="btn-insert" style={{ backgroundColor: "#1b5e20" }} onClick={() => csvInputRef.current.click()}>
                   <FiDownload /> Importar CSV
                 </button>
               </div>
@@ -207,13 +229,13 @@ export default function CxC() {
               <table className="custom-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "50px" }}></th>
+                    <th></th>
                     <th>Folio / Cliente</th>
                     <th>Categoría</th>
                     <th>Fecha Venc.</th>
                     <th>Monto</th>
                     <th>Estado</th>
-                    <th style={{ width: "120px" }}>Acciones</th>
+                    <th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -225,23 +247,19 @@ export default function CxC() {
                           <span className="badge-cliente">{group.cliente}</span>
                           <small>({group.items.length})</small>
                         </td>
-                        <td className="actions"></td>
+                        <td></td>
                       </tr>
                       {expandedClients[group.cliente] && group.items.map((item) => (
                         <tr key={item.id} className="row-detail">
                           <td></td>
                           <td className="enlace-name">{item.folio}</td>
-                          <td style={{ color: "#666", fontSize: "0.9rem" }}>{item.category}</td>
+                          <td>{item.category}</td>
                           <td>{item.due_date}</td>
                           <td style={{ fontWeight: "600" }}>${item.monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                          <td><span className={`status-pill ${item.estado.toLowerCase()}`}>{item.estado}</span></td>
+                          <td><span className={`status-pill ${item.estado.toLowerCase().replace(" ", "-")}`}>{item.estado}</span></td>
                           <td className="actions">
-                            <button className="btn-icon edit" title="Editar" onClick={(e) => handleEditClick(e, item, group.cliente)}>
-                              <FiEdit />
-                            </button>
-                            <button className="btn-icon delete" title="Eliminar" onClick={() => handleDelete(item.id)}>
-                              <FiTrash2 />
-                            </button>
+                            <button className="btn-icon edit" onClick={(e) => handleEditClick(e, item, group.cliente)}><FiEdit /></button>
+                            <button className="btn-icon delete" onClick={() => handleDelete(item.id)}><FiTrash2 /></button>
                           </td>
                         </tr>
                       ))}
@@ -256,16 +274,12 @@ export default function CxC() {
 
       {isModalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{maxWidth: '500px'}}>
+          <div className="modal-content">
             <div className="modal-header">
               <h3>Editar Registro CxC</h3>
               <button className="close-modal" onClick={() => setIsModalOpen(false)}><FiX /></button>
             </div>
             <form onSubmit={handleUpdate} className="insert-form">
-              <div className="form-group">
-                <label>Cliente</label>
-                <input name="cliente" required value={formEntry.cliente} onChange={handleInputChange} disabled />
-              </div>
               <div className="form-group">
                 <label>Folio</label>
                 <input name="folio" required value={formEntry.folio} onChange={handleInputChange} />
@@ -287,7 +301,7 @@ export default function CxC() {
                 <select name="estado" value={formEntry.estado} onChange={handleInputChange}>
                   <option value="Pendiente">Pendiente</option>
                   <option value="Pagado">Pagado</option>
-                  <option value="Vencido">Vencido</option>
+                  <option value="Cartera Vencida">Cartera Vencida</option>
                 </select>
               </div>
               <div className="form-actions">

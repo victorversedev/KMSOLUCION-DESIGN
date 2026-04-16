@@ -82,14 +82,22 @@ export default function Facturaciones() {
           const validRows = results.data.filter(row => row.cliente || row.folio);
 
           const formatExcelDate = (dateString) => {
-            if (!dateString) return new Date().toISOString().split('T')[0];
-            const str = dateString.trim();
-            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-            const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (mxDateMatch) return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
-            const d = new Date(str);
-            return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
-          };
+  if (!dateString) return new Date().toISOString().split('T')[0];
+  const str = dateString.trim();
+
+  // Caso 1: Ya viene como YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+  // Caso 2: Formato M/D/YYYY (el de tu imagen) o D/M/YYYY
+  const parts = str.split('/');
+  if (parts.length === 3) {
+    let [p1, p2, year] = parts;
+    return `${year}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
+  }
+
+  const d = new Date(str);
+  return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
+};
 
           const uploadPromises = validRows.map(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;

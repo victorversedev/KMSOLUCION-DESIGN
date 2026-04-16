@@ -11,8 +11,9 @@ import { FiChevronLeft, FiChevronRight, FiMove } from 'react-icons/fi';
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-const ZOHO_BLUE = '#0062ff';
-const ZOHO_RED = '#ff3333';
+// CONFIGURACIÓN DE COLORES UNIFICADA
+const ZOHO_BLUE = '#0062ff'; // Color para Datos
+const ZOHO_RED = '#ff3333';  // Color para Tendencia
 const ZOHO_GREEN = '#10b981';
 const ZOHO_GREY = '#666666';
 const ZOHO_GRID = '#e5e7eb';
@@ -67,8 +68,6 @@ const fetchDashboardData = async () => {
   };
 };
 
-// ... (ZohoGraphic y calcularLineaTendenciaMejorada se mantienen igual)
-
 const calcularLineaTendenciaMejorada = (data, keyY) => {
   if (!data || data.length < 2) return data;
   const n = data.length;
@@ -85,6 +84,7 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
   const MAX_ITEMS = 12; 
   const [offset, setOffset] = useState(0);
   useEffect(() => { setOffset(Math.max(0, dataset.length - MAX_ITEMS)); }, [dataset]);
+  
   const fullDataList = mostrarTendencia ? calcularLineaTendenciaMejorada(dataset, 'total') : dataset;
   const visibleData = fullDataList.slice(offset, offset + MAX_ITEMS);
   const canPrev = offset > 0;
@@ -96,13 +96,17 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
     const commonXAxis = (
       <XAxis dataKey="ejeX" tick={{ fill: ZOHO_GREY, fontSize: 10 }} axisLine={{ stroke: '#ccc' }} tickLine={false} interval={0} angle={-45} textAnchor="end" height={60} />
     );
+    const commonYAxis = (
+      <YAxis tickFormatter={(val) => `$${val.toLocaleString()}`} tick={{ fill: ZOHO_GREY, fontSize: 12 }} axisLine={false} tickLine={false} width={80} />
+    );
+
     switch (tipoGrafica) {
       case 'line':
         return (
           <LineChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
             {commonXAxis}
-            <YAxis tickFormatter={(val) => `$${val.toLocaleString()}`} tick={{ fill: ZOHO_GREY, fontSize: 12 }} axisLine={false} tickLine={false} width={80} />
+            {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Line type="monotone" dataKey="total" stroke={colorPrincipal} strokeWidth={3} dot={{ stroke: colorPrincipal, strokeWidth: 2, r: 4, fill: '#fff' }} activeDot={{ r: 6, fill: colorPrincipal, stroke: '#fff' }} name={nombreValor} />
@@ -114,10 +118,11 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
           <BarChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
             {commonXAxis}
-            <YAxis tickFormatter={(val) => `$${val.toLocaleString()}`} tick={{ fill: ZOHO_GREY, fontSize: 12 }} axisLine={false} tickLine={false} width={80} />
+            {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Bar dataKey="total" fill={colorPrincipal} radius={[4, 4, 0, 0]} name={nombreValor} barSize={25} />
+            {mostrarTendencia && <Line type="linear" dataKey="tendenciaRojaValue" stroke={ZOHO_RED} strokeWidth={2} dot={false} activeDot={false} name="Tendencia" />}
           </BarChart>
         );
       case 'area':
@@ -125,10 +130,11 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
           <AreaChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
             {commonXAxis}
-            <YAxis tickFormatter={(val) => `$${val.toLocaleString()}`} tick={{ fill: ZOHO_GREY, fontSize: 12 }} axisLine={false} tickLine={false} width={80} />
+            {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Area type="monotone" dataKey="total" stroke={colorPrincipal} strokeWidth={2} fill={colorPrincipal} fillOpacity={0.15} name={nombreValor} />
+            {mostrarTendencia && <Line type="linear" dataKey="tendenciaRojaValue" stroke={ZOHO_RED} strokeWidth={2} dot={false} activeDot={false} name="Tendencia" />}
           </AreaChart>
         );
       case 'pie':
@@ -171,7 +177,6 @@ export default function DashboardKMS() {
     setFiltros(prev => ({ ...prev, [panel]: { ...prev[panel], [campo]: valor } }));
   };
 
-  // Listado dinámico de Clientes y Categorías
   const listas = useMemo(() => ({
     clientes: {
       facturas: data ? ['Todos', ...new Set(data.facturasRaw.map(f => f.cliente))] : ['Todos'],
@@ -221,7 +226,9 @@ export default function DashboardKMS() {
   const renderPanel = (panel) => {
     const titulos = { facturas: 'Facturación Real', ingresos: 'Ingresos Cobrados', cartera: 'Cuentas por Cobrar' };
     const rawKeys = { facturas: 'facturasRaw', ingresos: 'ingresosRaw', cartera: 'cobrarRaw' };
-    const colores = { facturas: ZOHO_BLUE, ingresos: ZOHO_GREEN, cartera: '#f59e0b' };
+    
+    // TODAS LAS GRÁFICAS USAN EL MISMO COLOR PRINCIPAL (AZUL)
+    const colorPrincipal = ZOHO_BLUE;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -231,21 +238,16 @@ export default function DashboardKMS() {
             <h3 style={styles.panelTitle}>{titulos[panel]}</h3>
           </div>
           <div style={styles.controlsRow}>
-            {/* Filtro Cliente */}
             <select style={styles.select} value={filtros[panel].cliente} onChange={(e) => handleFiltroChange(panel, 'cliente', e.target.value)}>
               {listas.clientes[panel].map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            {/* Filtro Categoría */}
             <select style={styles.select} value={filtros[panel].categoria} onChange={(e) => handleFiltroChange(panel, 'categoria', e.target.value)}>
               {listas.categorias[panel].map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
-            {/* Agrupar */}
             <select style={styles.select} value={filtros[panel].agrupar} onChange={(e) => handleFiltroChange(panel, 'agrupar', e.target.value)}>
               <option value="mes">Por Mes</option>
               <option value="quincena">Por Quincena</option>
               <option value="semana">Por Semana</option>
-              <option value="cliente">Por Cliente</option>
-              <option value="categoria">Por Categoría</option>
             </select>
             <select style={styles.select} value={filtros[panel].tipo} onChange={(e) => handleFiltroChange(panel, 'tipo', e.target.value)}>
               <option value="line">Línea</option>
@@ -256,7 +258,14 @@ export default function DashboardKMS() {
           </div>
         </div>
         <div style={{ flex: 1, minHeight: '300px' }}>
-          <ZohoGraphic dataset={procesarGrafica(rawKeys[panel], panel)} tipoGrafica={filtros[panel].tipo} colorPrincipal={colores[panel]} mostrarTendencia={filtros[panel].tipo === 'line' && filtros[panel].agrupar !== 'cliente'} nombreValor={titulos[panel]} />
+          <ZohoGraphic 
+            dataset={procesarGrafica(rawKeys[panel], panel)} 
+            tipoGrafica={filtros[panel].tipo} 
+            colorPrincipal={colorPrincipal} 
+            // La tendencia se muestra si es línea/barra/área y está agrupado temporalmente
+            mostrarTendencia={['line', 'bar', 'area'].includes(filtros[panel].tipo) && !['cliente', 'categoria'].includes(filtros[panel].agrupar)} 
+            nombreValor={titulos[panel]} 
+          />
         </div>
       </div>
     );

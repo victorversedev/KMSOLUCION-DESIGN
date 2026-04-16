@@ -76,48 +76,60 @@ export default function Cotizaciones() {
     setFormEntry({ ...formEntry, [name]: value });
   };
 
-  const handleCSVUpload = (e) => {
+    const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (header) => header.trim().toLowerCase().replace(/[^a-z0-9]/g, ''),
+      transformHeader: (header) => header.trim().toLowerCase().replace(/[^a-z0-9]/g, ''), 
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
 
           const formatExcelDate = (dateString) => {
-            if (!dateString) return new Date().toISOString().split('T')[0];
-            const str = dateString.trim();
-            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-            const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-            if (mxDateMatch) return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
-            const d = new Date(str);
-            return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
-          };
+  if (!dateString) return new Date().toISOString().split('T')[0];
+  const str = dateString.trim();
+
+  // Caso 1: Ya viene como YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+  // Caso 2: Formato M/D/YYYY (el de tu imagen) o D/M/YYYY
+  const parts = str.split('/');
+  if (parts.length === 3) {
+    let [p1, p2, year] = parts;
+    // Si tu Excel está en inglés (Mes/Día/Año), usa esto:
+    return `${year}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
+    
+    // Si tu Excel está en español (Día/Mes/Año), descomenta la de abajo y comenta la de arriba:
+    // return `${year}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
+  }
+
+  // Caso 3: Fecha nativa de JS
+  const d = new Date(str);
+  return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
+};
 
           const uploadPromises = validRows.map(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
-            
             return axios.post(API_URL, {
               client_name: (row.cliente || "SIN CLIENTE").trim(),
               folio: (row.folio || "S/N").trim(),
               category: (row.categoria || row.category || "General").trim(),
-              date: formatExcelDate(row.fecha),
+              billing_date: formatExcelDate(row.fecha),
               amount: parseFloat(cleanMonto || 0),
               status: (row.estado || "Pendiente").trim()
             }, getAuthHeader());
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Cotizaciones importadas con éxito!");
+          alert("¡Facturas importadas con éxito!");
           fetchRecords(); 
           
         } catch (error) {
-          console.error("Error al procesar CSV:", error);
-          alert("Hubo un error de autenticación o permisos.");
+          console.error("Error al guardar:", error);
+          alert("No tienes permisos o la sesión caducó.");
         } finally {
           if(csvInputRef.current) csvInputRef.current.value = ""; 
         }
