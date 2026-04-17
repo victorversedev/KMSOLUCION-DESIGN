@@ -10,7 +10,7 @@ import "./Facturaciones.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-const BASE_URL = "https://kmsolucion.com/KMBD/public/api/";
+const BASE_URL = "https://kmsolucion.com/KMBD/public/api";
 const API_URL = `${BASE_URL}/facturas`;
 
 export default function Facturaciones() {
@@ -43,8 +43,9 @@ export default function Facturaciones() {
     };
   };
 
+  // Función corregida para que no rompa si la fecha es null
   const cleanDate = (dateStr) => {
-    if (!dateStr) return "";
+    if (!dateStr || dateStr === "null" || dateStr === undefined) return "";
     return dateStr.split("T")[0];
   };
 
@@ -74,24 +75,28 @@ export default function Facturaciones() {
   const fetchRecords = async () => {
     try {
       const response = await axios.get(API_URL, getAuthHeader());
-      const grouped = response.data.reduce((acc, curr) => {
-        const clientName = normalizeText(curr.client_name);
+      // Validamos que response.data sea un array antes de procesar
+      const records = Array.isArray(response.data) ? response.data : [];
+      
+      const grouped = records.reduce((acc, curr) => {
+        const clientName = normalizeText(curr.client_name || "SIN CLIENTE");
         if (!acc[clientName]) acc[clientName] = { cliente: clientName, items: [] };
         
         acc[clientName].items.push({
           id: curr.id,
-          folio: curr.folio,
+          folio: curr.folio || "S/N",
           category: normalizeText(curr.category),
           fecha: cleanDate(curr.billing_date),
-          fecha_pago: cleanDate(curr.payment_date), // Viene de Laravel como null si no existe
+          fecha_pago: cleanDate(curr.payment_date), // Si no existe, devuelve ""
           monto: parseFloat(curr.amount || 0),
-          estado: curr.status
+          estado: curr.status || "Pendiente"
         });
         return acc;
       }, {});
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos:", error);
+      setData([]); // Evita que la app truene si hay error de red
     }
   };
 
@@ -110,69 +115,33 @@ export default function Facturaciones() {
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
-          const today = new Date();
+          const allRequests = [];
 
-          const uploadPromises = validRows.flatMap(row => {
+          for (const row of validRows) {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
             const formattedDate = formatExcelDate(row.fecha);
             const formattedPaymentDate = row.fechapago ? formatExcelDate(row.fechapago) : null;
             
-            const cleanClient = normalizeText(row.cliente || "SIN CLIENTE");
-            const cleanCategory = normalizeText(row.categoria || row.category || "GENERAL");
+            if (!formattedDate) continue; 
 
-            let rawStatus = (row.estado || "").trim();
-            const lowerStatus = rawStatus.toLowerCase();
-            let finalStatus = rawStatus || "Pendiente";
-
-            if (["enviada", "enviado"].includes(lowerStatus)) finalStatus = "Pendiente";
-            else if (["pagada", "pagado", "aprobado"].includes(lowerStatus)) finalStatus = "Pagada";
-            else if (rawStatus === "") finalStatus = "Borrador";
-
-            const invoiceDate = new Date(formattedDate);
-            const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
-            if (finalStatus === "Pendiente" && diffDays >= 31) finalStatus = "Cartera Vencida";
-
-            const requests = [];
-
-            // 1. Payload Factura (DINÁMICO)
             const factPayload = {
-              client_name: cleanClient,
+              client_name: normalizeText(row.cliente || "SIN CLIENTE"),
               folio: (row.folio || "S/N").trim(),
-              category: cleanCategory,
+              category: normalizeText(row.categoria || "GENERAL"),
               billing_date: formattedDate,
               amount: parseFloat(cleanMonto),
-              status: finalStatus
+              status: row.estado || "Pendiente"
             };
-            if (formattedPaymentDate) factPayload.payment_date = formattedPaymentDate;
 
-            requests.push(axios.post(API_URL, factPayload, getAuthHeader()));
-
-            // 2. Cobros / CxC
-            if (finalStatus === "Pagada") {
-              const ingPayload = {
-                client_name: cleanClient,
-                folio: (row.folio || "S/N").trim(),
-                category: cleanCategory,
-                amount: parseFloat(cleanMonto),
-                status: "Ingreso"
-              };
-              // Usar fecha de pago si existe, si no, la de factura
-              ingPayload.payment_date = formattedPaymentDate || formattedDate;
-              requests.push(axios.post(`${BASE_URL}/ingresos`, ingPayload, getAuthHeader()));
-            } else {
-              requests.push(axios.post(`${BASE_URL}/cxc`, {
-                client_name: cleanClient,
-                folio: (row.folio || "S/N").trim(),
-                category: cleanCategory,
-                due_date: formattedDate,
-                amount: parseFloat(cleanMonto),
-                status: finalStatus
-              }, getAuthHeader()));
+            // Solo incluimos payment_date si realmente se obtuvo una fecha válida del CSV
+            if (formattedPaymentDate) {
+              factPayload.payment_date = formattedPaymentDate;
             }
-            return requests;
-          });
 
-          await Promise.all(uploadPromises);
+            allRequests.push(axios.post(API_URL, factPayload, getAuthHeader()));
+          }
+
+          await Promise.all(allRequests);
           alert("¡Importación exitosa!");
           fetchRecords(); 
         } catch (error) {
@@ -191,9 +160,9 @@ export default function Facturaciones() {
     setFormEntry({
       cliente: clienteName,
       folio: item.folio,
-      categoria: item.category || "",
+      categoria: item.category,
       fecha: item.fecha,
-      fecha_pago: item.fecha_pago || "", 
+      fecha_pago: item.fecha_pago || "", // Evita que el input date reciba null
       monto: item.monto,
       estado: item.estado
     });
@@ -203,7 +172,6 @@ export default function Facturaciones() {
   const handleUpdate = async (e) => {
     e.preventDefault();
     try {
-      // Objeto base sin fecha_pago
       const payload = {
         client_name: normalizeText(formEntry.cliente),
         folio: formEntry.folio,
@@ -213,8 +181,8 @@ export default function Facturaciones() {
         status: formEntry.estado
       };
 
-      // Si hay fecha de pago escrita, se agrega al envío
-      if (formEntry.fecha_pago && formEntry.fecha_pago !== "") {
+      // Solo enviar fecha_pago si tiene valor
+      if (formEntry.fecha_pago && formEntry.fecha_pago.trim() !== "") {
         payload.payment_date = formEntry.fecha_pago;
       }
 
@@ -222,7 +190,6 @@ export default function Facturaciones() {
       setIsModalOpen(false);
       fetchRecords();
     } catch (error) {
-      console.error(error);
       alert("Error al actualizar.");
     }
   };
@@ -244,12 +211,8 @@ export default function Facturaciones() {
 
   const filteredData = data.filter((group) => {
     const term = searchTerm.toLowerCase();
-    const matchesCliente = group.cliente.toLowerCase().includes(term);
-    const matchesItems = group.items.some(item => 
-      (item.folio && item.folio.toString().toLowerCase().includes(term)) ||
-      (item.category && item.category.toLowerCase().includes(term))
-    );
-    return matchesCliente || matchesItems;
+    return group.cliente.toLowerCase().includes(term) || 
+           group.items.some(item => item.folio.toString().toLowerCase().includes(term));
   });
 
   return (
@@ -264,7 +227,7 @@ export default function Facturaciones() {
               <div className="header-actions">
                 <div className="search-box">
                   <FiSearch className="search-icon" />
-                  <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <input type="text" placeholder="Buscar cliente o folio..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
                 <input type="file" accept=".csv" style={{ display: "none" }} ref={csvInputRef} onChange={handleCSVUpload} />
                 <button className="btn-insert" style={{ backgroundColor: "#1b5e20" }} onClick={() => csvInputRef.current.click()}>
@@ -287,7 +250,9 @@ export default function Facturaciones() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((group) => (
+                  {filteredData.length === 0 ? (
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>No se encontraron registros</td></tr>
+                  ) : filteredData.map((group) => (
                     <React.Fragment key={group.cliente}>
                       <tr className="row-client" onClick={() => toggleClient(group.cliente)}>
                         <td>{expandedClients[group.cliente] ? <FiChevronDown /> : <FiChevronRight />}</td>
@@ -303,13 +268,13 @@ export default function Facturaciones() {
                           <td className="enlace-name">{item.folio}</td>
                           <td style={{ color: "#666", fontSize: "0.9rem" }}>{item.category}</td>
                           <td>
-                            <div title="Fecha Emisión" style={{ fontWeight: "500" }}>{item.fecha}</div>
+                            <div title="Fecha Emisión" style={{ fontWeight: "500" }}>{item.fecha || 'Sin fecha'}</div>
                             {item.fecha_pago ? (
-                                <div title="Fecha Pago" style={{ fontSize: "0.75rem", color: "#2e7d32", borderTop: "1px solid #eee", marginTop: "2px" }}>
+                                <div style={{ fontSize: "0.75rem", color: "#2e7d32", borderTop: "1px solid #eee", marginTop: "2px" }}>
                                   Pagado: {item.fecha_pago}
                                 </div>
                             ) : (
-                                <div style={{ fontSize: "0.75rem", color: "#d32f2f" }}>Pendiente</div>
+                                <div style={{ fontSize: "0.75rem", color: "#999" }}>Pago: Pendiente</div>
                             )}
                           </td>
                           <td style={{ fontWeight: "600" }}>${item.monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
@@ -339,29 +304,25 @@ export default function Facturaciones() {
             <form onSubmit={handleUpdate} className="insert-form">
               <div className="form-group">
                 <label>Folio</label>
-                <input type="text" name="folio" value={formEntry.folio} onChange={(e) => setFormEntry({...formEntry, folio: e.target.value})} />
-              </div>
-              <div className="form-group">
-                <label>Categoría</label>
-                <input type="text" name="categoria" value={formEntry.categoria} onChange={(e) => setFormEntry({...formEntry, categoria: e.target.value})} />
+                <input type="text" value={formEntry.folio} onChange={(e) => setFormEntry({...formEntry, folio: e.target.value})} />
               </div>
               <div className="form-row" style={{ display: "flex", gap: "15px" }}>
                 <div className="form-group" style={{ flex: 1 }}>
-                    <label>Fecha de Factura</label>
-                    <input type="date" name="fecha" value={formEntry.fecha} onChange={(e) => setFormEntry({...formEntry, fecha: e.target.value})} />
+                    <label>Fecha Emisión</label>
+                    <input type="date" value={formEntry.fecha} onChange={(e) => setFormEntry({...formEntry, fecha: e.target.value})} />
                 </div>
                 <div className="form-group" style={{ flex: 1 }}>
-                    <label>Fecha de Pago (Opcional)</label>
-                    <input type="date" name="fecha_pago" value={formEntry.fecha_pago} onChange={(e) => setFormEntry({...formEntry, fecha_pago: e.target.value})} />
+                    <label>Fecha Pago (Opcional)</label>
+                    <input type="date" value={formEntry.fecha_pago} onChange={(e) => setFormEntry({...formEntry, fecha_pago: e.target.value})} />
                 </div>
               </div>
               <div className="form-group">
                 <label>Monto</label>
-                <input type="number" step="0.01" name="monto" value={formEntry.monto} onChange={(e) => setFormEntry({...formEntry, monto: e.target.value})} />
+                <input type="number" step="0.01" value={formEntry.monto} onChange={(e) => setFormEntry({...formEntry, monto: e.target.value})} />
               </div>
               <div className="form-group">
                 <label>Estado</label>
-                <select name="estado" value={formEntry.estado} onChange={(e) => setFormEntry({...formEntry, estado: e.target.value})}>
+                <select value={formEntry.estado} onChange={(e) => setFormEntry({...formEntry, estado: e.target.value})}>
                   <option value="Pagada">Pagada</option>
                   <option value="Pendiente">Pendiente</option>
                   <option value="Cartera Vencida">Cartera Vencida</option>
@@ -371,7 +332,7 @@ export default function Facturaciones() {
               </div>
               <div className="form-actions">
                 <button type="button" className="btn-cancel" onClick={() => setIsModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn-save">Actualizar Datos</button>
+                <button type="submit" className="btn-save">Guardar Cambios</button>
               </div>
             </form>
           </div>
