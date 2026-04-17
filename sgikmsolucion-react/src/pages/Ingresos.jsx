@@ -9,7 +9,7 @@ import "./Ingresos.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-const BASE_URL = "https://kmsolucion.com/KMBD/public/api/";
+const BASE_URL = "https://kmsolucion.com/KMBD/public/api";
 
 export default function Ingresos() {
   const [data, setData] = useState([]);
@@ -38,6 +38,13 @@ export default function Ingresos() {
     estado: "Ingreso"
   });
 
+  // --- UTILIDADES ---
+
+  const cleanDate = (dateStr) => {
+    if (!dateStr || dateStr === "null") return "";
+    return dateStr.split("T")[0];
+  };
+
   const formatExcelDate = (dateString) => {
     if (!dateString) return new Date().toISOString().split('T')[0];
     const str = String(dateString).trim();
@@ -53,23 +60,27 @@ export default function Ingresos() {
   const fetchRecords = async () => {
     try {
       const response = await axios.get(`${BASE_URL}/ingresos`, getAuthHeader());
-      const grouped = response.data.reduce((acc, curr) => {
-        const clientName = curr.client_name.toUpperCase();
+      const records = Array.isArray(response.data) ? response.data : [];
+
+      const grouped = records.reduce((acc, curr) => {
+        // Protección contra nombre de cliente nulo
+        const clientName = (curr.client_name || "GENERAL").toUpperCase();
         if (!acc[clientName]) acc[clientName] = { cliente: clientName, items: [] };
         
         acc[clientName].items.push({
           id: curr.id,
-          folio: curr.folio, 
-          category: curr.category,
-          fecha_pag: curr.payment_date,
-          monto: parseFloat(curr.amount),
-          estado: curr.status
+          folio: curr.folio || "S/N", 
+          category: curr.category || "GENERAL",
+          fecha_pag: cleanDate(curr.payment_date),
+          monto: parseFloat(curr.amount || 0),
+          estado: curr.status || "Ingreso"
         });
         return acc;
       }, {});
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos de Ingresos:", error);
+      setData([]);
     }
   };
 
@@ -86,7 +97,6 @@ export default function Ingresos() {
     setFormEntry({ ...formEntry, [name]: value });
   };
 
-  // --- LÓGICA DE IMPORTACIÓN Y REPARTO CORREGIDA ---
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -98,28 +108,20 @@ export default function Ingresos() {
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
-          const today = new Date();
-
+          
           const uploadPromises = validRows.map(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
-            const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
+            const rawStatus = (row.estado || "Ingreso").trim().toLowerCase();
             
-            let targetEndpoint = "";
-            let finalStatus = "";
+            let targetEndpoint = `${BASE_URL}/ingresos`;
+            let finalStatus = "Ingreso";
 
-            // 1. Determinar Destino
-            if (rawStatus === "aprobado" || rawStatus === "aprobada" || rawStatus === "pagado" || rawStatus === "completado") {
-              targetEndpoint = `${BASE_URL}/ingresos`;
-              finalStatus = "Ingreso";
-            } else {
+            // Lógica de reparto simplificada
+            if (!["aprobado", "aprobada", "pagado", "ingreso"].includes(rawStatus)) {
               targetEndpoint = `${BASE_URL}/cxc`;
-              const formattedDate = formatExcelDate(row.fecha || row.fechapag);
-              const invoiceDate = new Date(formattedDate);
-              const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
-              finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
+              finalStatus = "Pendiente";
             }
 
-            // 2. Construir Payload base
             const payload = {
               client_name: (row.cliente || "SIN CLIENTE").trim(),
               folio: (row.folio || "S/N").trim(),
@@ -128,22 +130,22 @@ export default function Ingresos() {
               status: finalStatus
             };
 
-            // 3. Asignar llave de fecha según el destino (EVITA EL ERROR DE REPARTO)
+            const dateValue = formatExcelDate(row.fecha || row.fechapag || row.fechaven);
             if (targetEndpoint.includes("/ingresos")) {
-              payload.payment_date = formatExcelDate(row.fecha || row.fechapag);
+              payload.payment_date = dateValue;
             } else {
-              payload.due_date = formatExcelDate(row.fechaven || row.fecha || row.duedate);
+              payload.due_date = dateValue;
             }
 
             return axios.post(targetEndpoint, payload, getAuthHeader());
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Reparto completado exitosamente!");
+          alert("¡Importación y reparto exitosos!");
           fetchRecords();
         } catch (error) {
-          console.error("Error detallado:", error.response?.data);
-          alert("Error al repartir. Verifica que los campos en Laravel coincidan.");
+          console.error("Error en importación:", error);
+          alert("Error al procesar el CSV.");
         } finally {
           if (csvInputRef.current) csvInputRef.current.value = "";
         }
@@ -157,8 +159,8 @@ export default function Ingresos() {
     setFormEntry({
       cliente: clienteName,
       folio: item.folio,
-      categoria: item.category || "",
-      fecha_pag: item.fecha_pag,
+      categoria: item.category,
+      fecha_pag: item.fecha_pag || "",
       monto: item.monto,
       estado: item.estado
     });
@@ -196,12 +198,8 @@ export default function Ingresos() {
 
   const filteredData = data.filter((group) => {
     const search = searchTerm.toLowerCase();
-    const matchesCliente = group.cliente.toLowerCase().includes(search);
-    const matchesItems = group.items.some(item => 
-      item.folio.toString().toLowerCase().includes(search) ||
-      (item.category && item.category.toLowerCase().includes(search))
-    );
-    return matchesCliente || matchesItems;
+    return group.cliente.toLowerCase().includes(search) || 
+           group.items.some(item => item.folio.toString().toLowerCase().includes(search));
   });
 
   return (
@@ -216,7 +214,7 @@ export default function Ingresos() {
               <div className="header-actions">
                 <div className="search-box">
                   <FiSearch className="search-icon" />
-                  <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  <input type="text" placeholder="Buscar por cliente o folio..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
                 <input type="file" accept=".csv" style={{ display: "none" }} ref={csvInputRef} onChange={handleCSVUpload} />
                 <button className="btn-insert" style={{ backgroundColor: "#1b5e20" }} onClick={() => csvInputRef.current.click()}>
@@ -229,7 +227,7 @@ export default function Ingresos() {
               <table className="custom-table">
                 <thead>
                   <tr>
-                    <th></th>
+                    <th style={{width: '50px'}}></th>
                     <th>Folio / Cliente</th>
                     <th>Categoría</th>
                     <th>Fecha de Pago</th>
@@ -239,13 +237,15 @@ export default function Ingresos() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((group) => (
+                  {filteredData.length === 0 ? (
+                    <tr><td colSpan="7" style={{textAlign: 'center', padding: '20px'}}>No hay registros disponibles</td></tr>
+                  ) : filteredData.map((group) => (
                     <React.Fragment key={group.cliente}>
                       <tr className="row-client" onClick={() => toggleClient(group.cliente)}>
                         <td>{expandedClients[group.cliente] ? <FiChevronDown /> : <FiChevronRight />}</td>
                         <td colSpan="5">
                           <span className="badge-cliente">{group.cliente}</span>
-                          <small>({group.items.length})</small>
+                          <small style={{marginLeft: '10px'}}>({group.items.length})</small>
                         </td>
                         <td></td>
                       </tr>
@@ -254,9 +254,9 @@ export default function Ingresos() {
                           <td></td>
                           <td className="enlace-name">{item.folio}</td>
                           <td>{item.category}</td>
-                          <td>{item.fecha_pag}</td>
+                          <td>{item.fecha_pag || <span style={{color: '#999'}}>Sin fecha</span>}</td>
                           <td style={{ fontWeight: "600" }}>${item.monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                          <td><span className={`status-pill ${item.estado.toLowerCase().replace(" ", "-")}`}>{item.estado}</span></td>
+                          <td><span className={`status-pill ${item.estado.toLowerCase().replace(/\s+/g, '-')}`}>{item.estado}</span></td>
                           <td className="actions">
                             <button className="btn-icon edit" onClick={(e) => handleEditClick(e, item, group.cliente)}><FiEdit /></button>
                             <button className="btn-icon delete" onClick={() => handleDelete(item.id)}><FiTrash2 /></button>
@@ -285,12 +285,8 @@ export default function Ingresos() {
                 <input name="folio" required value={formEntry.folio} onChange={handleInputChange} />
               </div>
               <div className="form-group">
-                <label>Categoría</label>
-                <input name="categoria" value={formEntry.categoria} onChange={handleInputChange} />
-              </div>
-              <div className="form-group">
                 <label>Fecha de Pago</label>
-                <input type="date" name="fecha_pag" required value={formEntry.fecha_pag} onChange={handleInputChange} />
+                <input type="date" name="fecha_pag" value={formEntry.fecha_pag} onChange={handleInputChange} />
               </div>
               <div className="form-group">
                 <label>Monto</label>
