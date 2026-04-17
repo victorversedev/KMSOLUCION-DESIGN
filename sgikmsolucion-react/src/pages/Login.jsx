@@ -4,7 +4,7 @@ import axios from "axios";
 import logo from "../assets/Logo.png";
 import "./Login.css";
 
-const LOGIN_URL = "https://kmsolucion.com/KMBD/public/api/login";
+const LOGIN_URL = "https://kmsolucion.com/KMBD/api/login";
 
 export default function Login() {
   const navigate = useNavigate();

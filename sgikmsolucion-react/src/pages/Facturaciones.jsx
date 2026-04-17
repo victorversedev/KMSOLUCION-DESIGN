@@ -10,13 +10,14 @@ import "./Facturaciones.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-const API_URL = "https://kmsolucion.com/KMBD/public/api/facturas";
+// Definimos las rutas base
+const BASE_URL = "https://kmsolucion.com/KMBD/public/api";
+const API_URL = `${BASE_URL}/facturas`;
 
 export default function Facturaciones() {
   const [data, setData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedClients, setExpandedClients] = useState({});
-
   const csvInputRef = useRef(null); 
 
   const getAuthHeader = () => {
@@ -29,17 +30,23 @@ export default function Facturaciones() {
     };
   };
 
-  // Estados para el Modal de Edición
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formEntry, setFormEntry] = useState({
-    cliente: "",
-    folio: "", 
-    categoria: "",
-    fecha: "",
-    monto: "",
-    estado: ""
+    cliente: "", folio: "", categoria: "", fecha: "", monto: "", estado: ""
   });
+
+  const formatExcelDate = (dateString) => {
+    if (!dateString) return new Date().toISOString().split('T')[0];
+    const str = String(dateString).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mxDateMatch) {
+      return `${mxDateMatch[3]}-${mxDateMatch[2].padStart(2, '0')}-${mxDateMatch[1].padStart(2, '0')}`;
+    }
+    const d = new Date(str);
+    return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
+  };
 
   const fetchRecords = async () => {
     try {
@@ -47,7 +54,6 @@ export default function Facturaciones() {
       const grouped = response.data.reduce((acc, curr) => {
         const clientName = curr.client_name.toUpperCase();
         if (!acc[clientName]) acc[clientName] = { cliente: clientName, items: [] };
-        
         acc[clientName].items.push({
           id: curr.id,
           folio: curr.folio,
@@ -61,7 +67,6 @@ export default function Facturaciones() {
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos:", error);
-      if (error.response?.status === 401) alert("Sesión expirada. Por favor inicia sesión de nuevo.");
     }
   };
 
@@ -69,6 +74,7 @@ export default function Facturaciones() {
     fetchRecords();
   }, []);
 
+  // --- LÓGICA DE IMPORTACIÓN CON REPARTO AUTOMÁTICO ---
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -80,50 +86,76 @@ export default function Facturaciones() {
       complete: async (results) => {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
+          const today = new Date();
 
-          const formatExcelDate = (dateString) => {
-  if (!dateString) return new Date().toISOString().split('T')[0];
-  const str = dateString.trim();
-
-  // Caso 1: Ya viene como YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-
-  // Caso 2: Formato M/D/YYYY (el de tu imagen) o D/M/YYYY
-  const parts = str.split('/');
-  if (parts.length === 3) {
-    let [p1, p2, year] = parts;
-    return `${year}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
-  }
-
-  const d = new Date(str);
-  return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
-};
-
-          const uploadPromises = validRows.map(row => {
+          const uploadPromises = validRows.flatMap(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
-            return axios.post(API_URL, {
+            const formattedDate = formatExcelDate(row.fecha);
+            const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
+            
+            // 1. Lógica de Cartera Vencida (31 días)
+            const invoiceDate = new Date(formattedDate);
+            const diffTime = Math.abs(today - invoiceDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            let finalStatus = row.estado || "Pendiente";
+            if (rawStatus === "pendiente" && diffDays >= 31) {
+              finalStatus = "Cartera Vencida";
+            }
+
+            // --- PROMESAS DE REPARTO ---
+            const requests = [];
+
+            // A. Siempre registrar en Facturas
+            requests.push(axios.post(API_URL, {
               client_name: (row.cliente || "SIN CLIENTE").trim(),
               folio: (row.folio || "S/N").trim(),
               category: (row.categoria || row.category || "General").trim(),
-              billing_date: formatExcelDate(row.fecha),
-              amount: parseFloat(cleanMonto || 0),
-              status: (row.estado || "Pendiente").trim()
-            }, getAuthHeader());
+              billing_date: formattedDate,
+              amount: parseFloat(cleanMonto),
+              status: finalStatus
+            }, getAuthHeader()));
+
+            // B. Si es Aprobado/Pagado -> Enviar a Ingresos
+            if (["aprobado", "aprobada", "pagado", "completado"].includes(rawStatus)) {
+              requests.push(axios.post(`${BASE_URL}/ingresos`, {
+                client_name: (row.cliente || "SIN CLIENTE").trim(),
+                folio: (row.folio || "S/N").trim(),
+                category: (row.categoria || row.category || "General").trim(),
+                payment_date: formattedDate,
+                amount: parseFloat(cleanMonto),
+                status: "Ingreso"
+              }, getAuthHeader()));
+            } 
+            // C. Si es Pendiente o Cartera Vencida -> Enviar a CxC
+            else {
+              requests.push(axios.post(`${BASE_URL}/cxc`, {
+                client_name: (row.cliente || "SIN CLIENTE").trim(),
+                folio: (row.folio || "S/N").trim(),
+                category: (row.categoria || row.category || "General").trim(),
+                due_date: formattedDate,
+                amount: parseFloat(cleanMonto),
+                status: finalStatus
+              }, getAuthHeader()));
+            }
+
+            return requests;
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Facturas importadas con éxito!");
+          alert("¡Importación y reparto completado con éxito!");
           fetchRecords(); 
-          
         } catch (error) {
-          console.error("Error al guardar:", error);
-          alert("No tienes permisos o la sesión caducó.");
+          console.error("Error en reparto:", error);
+          alert("Error al procesar el archivo. Revisa los datos.");
         } finally {
           if(csvInputRef.current) csvInputRef.current.value = ""; 
         }
       }
     });
   };
+
+  // ... (Resto del componente se mantiene igual: handleEditClick, handleUpdate, Render, etc.)
 
   const handleEditClick = (e, item, clienteName) => {
     e.stopPropagation();
@@ -158,7 +190,7 @@ export default function Facturaciones() {
       setIsModalOpen(false);
       fetchRecords();
     } catch (error) {
-      alert("Error al actualizar: Sesión inválida o falta de permisos.");
+      alert("Error al actualizar.");
     }
   };
 
@@ -168,8 +200,7 @@ export default function Facturaciones() {
         await axios.delete(`${API_URL}/${id}`, getAuthHeader());
         fetchRecords(); 
       } catch (error) {
-        console.error("Error al eliminar");
-        alert("No se pudo eliminar. Verifica tus permisos.");
+        alert("No se pudo eliminar.");
       }
     }
   };
@@ -181,7 +212,7 @@ export default function Facturaciones() {
   const filteredData = data.filter((group) => {
     const matchesCliente = group.cliente.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesItems = group.items.some(item => 
-      (item.folio && item.folio.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.folio && item.folio.toString().toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
     );
     return matchesCliente || matchesItems;
@@ -193,7 +224,6 @@ export default function Facturaciones() {
       <div className="main-content">
         <TopBar />
         <main className="content-area">
-          {/* TABLA DE FACTURACIONES */}
           <div className="table-container">
             <div className="table-header">
               <h2>Registro de Facturaciones</h2>

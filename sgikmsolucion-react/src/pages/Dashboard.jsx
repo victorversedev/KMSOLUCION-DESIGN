@@ -5,15 +5,15 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
   AreaChart, Area, PieChart, Pie, Cell, Legend, LineChart, Line 
 } from 'recharts';
-import { FaFileInvoiceDollar, FaMoneyBillWave, FaHandHoldingUsd, FaExclamationTriangle } from 'react-icons/fa';
+import { FaFileInvoiceDollar, FaMoneyBillWave, FaHandHoldingUsd, FaExclamationTriangle, FaCalendarDay } from 'react-icons/fa';
 import { FiChevronLeft, FiChevronRight, FiMove } from 'react-icons/fi';
 
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
 // CONFIGURACIÓN DE COLORES UNIFICADA
-const ZOHO_BLUE = '#0062ff'; // Color para Datos
-const ZOHO_RED = '#ff3333';  // Color para Tendencia
+const ZOHO_BLUE = '#0062ff';
+const ZOHO_RED = '#ff3333';
 const ZOHO_GREEN = '#10b981';
 const ZOHO_GREY = '#666666';
 const ZOHO_GRID = '#e5e7eb';
@@ -39,15 +39,16 @@ const fetchDashboardData = async () => {
   const cxc = resCxc.data;
   const ingresos = resIngresos.data;
 
-  const totalFacturado = facturas.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
-  const totalCobrado = ingresos.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
-  const totalPorCobrar = cxc.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
-  const totalVencido = cxc.filter(item => String(item.status).toLowerCase().trim() === 'vencido').reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+  // LÓGICA PARA FILTRO SEMANAL (Semana actual según fecha de sistema)
+  const hoy = new Date();
+  const inicioSemana = new Date(hoy);
+  inicioSemana.setDate(hoy.getDate() - hoy.getDay()); 
+  inicioSemana.setHours(0, 0, 0, 0);
 
   const mesesArr = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
   const processDate = (dateStr) => {
-    if (!dateStr) return { mes: 'N/A', quincena: 'N/A', semana: 'N/A', timestamp: 0 };
+    if (!dateStr) return { mes: 'N/A', quincena: 'N/A', semana: 'N/A', timestamp: 0, dateObj: null };
     const d = new Date(dateStr + "T00:00:00");
     const dia = d.getDate();
     const mesIdx = d.getMonth();
@@ -56,12 +57,25 @@ const fetchDashboardData = async () => {
       mes: `${mesesArr[mesIdx]} ${anio}`,
       quincena: `${dia <= 15 ? '1Q' : '2Q'} ${mesesArr[mesIdx]} ${anio}`,
       semana: `Sem ${Math.ceil(dia / 7)} ${mesesArr[mesIdx]} ${anio.toString().slice(-2)}`,
-      timestamp: d.getTime()
+      timestamp: d.getTime(),
+      dateObj: d
     };
   };
 
+  const totalFacturado = facturas.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+  
+  // KPI Facturación Semanal
+  const facturadoSemanal = facturas.filter(item => {
+    const d = new Date(item.billing_date + "T00:00:00");
+    return d >= inicioSemana && d <= hoy;
+  }).reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+
+  const totalCobrado = ingresos.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+  const totalPorCobrar = cxc.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+  const totalVencido = cxc.filter(item => String(item.status).toLowerCase().trim() === 'vencido').reduce((acc, item) => acc + parseFloat(item.amount || 0), 0);
+
   return {
-    kpis: { facturado: totalFacturado, cobrado: totalCobrado, porCobrar: totalPorCobrar, carteraVencida: totalVencido },
+    kpis: { facturado: totalFacturado, facturadoSemanal, cobrado: totalCobrado, porCobrar: totalPorCobrar, carteraVencida: totalVencido },
     facturasRaw: facturas.map(item => ({ cliente: item.client_name.toUpperCase(), categoria: item.category || 'General', monto: parseFloat(item.amount), ...processDate(item.billing_date) })),
     cobrarRaw: cxc.map(item => ({ cliente: item.client_name.toUpperCase(), categoria: item.category || 'General', monto: parseFloat(item.amount), ...processDate(item.due_date) })),
     ingresosRaw: ingresos.map(item => ({ cliente: item.client_name.toUpperCase(), categoria: item.category || 'General', monto: parseFloat(item.amount), ...processDate(item.payment_date) }))
@@ -105,8 +119,7 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
         return (
           <LineChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
-            {commonXAxis}
-            {commonYAxis}
+            {commonXAxis} {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Line type="monotone" dataKey="total" stroke={colorPrincipal} strokeWidth={3} dot={{ stroke: colorPrincipal, strokeWidth: 2, r: 4, fill: '#fff' }} activeDot={{ r: 6, fill: colorPrincipal, stroke: '#fff' }} name={nombreValor} />
@@ -117,8 +130,7 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
         return (
           <BarChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
-            {commonXAxis}
-            {commonYAxis}
+            {commonXAxis} {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Bar dataKey="total" fill={colorPrincipal} radius={[4, 4, 0, 0]} name={nombreValor} barSize={25} />
@@ -129,8 +141,7 @@ const ZohoGraphic = ({ dataset, tipoGrafica, mostrarTendencia, nombreValor, colo
         return (
           <AreaChart data={visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={ZOHO_GRID} />
-            {commonXAxis}
-            {commonYAxis}
+            {commonXAxis} {commonYAxis}
             <RechartsTooltip />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
             <Area type="monotone" dataKey="total" stroke={colorPrincipal} strokeWidth={2} fill={colorPrincipal} fillOpacity={0.15} name={nombreValor} />
@@ -224,10 +235,8 @@ export default function DashboardKMS() {
   if (error) return <div className="layout-container"><SideMenu /><div className="main-content"><TopBar /><div style={styles.center}><h3>Sesión expirada o error de conexión.</h3></div></div></div>;
 
   const renderPanel = (panel) => {
-    const titulos = { facturas: 'Facturación Real', ingresos: 'Ingresos Cobrados', cartera: 'Cuentas por Cobrar' };
+    const titulos = { facturas: 'Facturación', ingresos: 'Ingresos Cobrados', cartera: 'Cuentas por Cobrar' };
     const rawKeys = { facturas: 'facturasRaw', ingresos: 'ingresosRaw', cartera: 'cobrarRaw' };
-    
-    // TODAS LAS GRÁFICAS USAN EL MISMO COLOR PRINCIPAL (AZUL)
     const colorPrincipal = ZOHO_BLUE;
 
     return (
@@ -262,7 +271,6 @@ export default function DashboardKMS() {
             dataset={procesarGrafica(rawKeys[panel], panel)} 
             tipoGrafica={filtros[panel].tipo} 
             colorPrincipal={colorPrincipal} 
-            // La tendencia se muestra si es línea/barra/área y está agrupado temporalmente
             mostrarTendencia={['line', 'bar', 'area'].includes(filtros[panel].tipo) && !['cliente', 'categoria'].includes(filtros[panel].agrupar)} 
             nombreValor={titulos[panel]} 
           />
@@ -282,7 +290,12 @@ export default function DashboardKMS() {
             <p style={{ color: '#6b7280', margin: '5px 0 0 0' }}>Estadísticas reales protegidas por Sanctum</p>
           </div>
           <div style={styles.kpiGrid}>
-            <KpiCard title="Facturación" value={`$${data.kpis.facturado.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} icon={<FaFileInvoiceDollar />} color={ZOHO_BLUE} />
+            <KpiCard 
+              title="Facturación Semanal" 
+              value={`$${data.kpis.facturadoSemanal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} 
+              icon={<FaCalendarDay />} 
+              color="#6366f1" 
+            />
             <KpiCard title="Ingresos" value={`$${data.kpis.cobrado.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} icon={<FaHandHoldingUsd />} color={ZOHO_GREEN} />
             <KpiCard title="CxC" value={`$${data.kpis.porCobrar.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} icon={<FaMoneyBillWave />} color="#f59e0b" />
             <KpiCard title="Cartera Vencida" value={`$${data.kpis.carteraVencida.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} icon={<FaExclamationTriangle />} color={ZOHO_RED} />
