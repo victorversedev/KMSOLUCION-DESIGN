@@ -37,12 +37,10 @@ export default function TopBar() {
       </div>
 
       <div className="actions">
-        <FiBell />
         <FiUser 
           onClick={() => isAdmin ? setShowAdminModal(true) : alert("Acceso restringido")} 
           style={{ cursor: isAdmin ? "pointer" : "not-allowed", color: isAdmin ? "#2d5a27" : "#ccc" }}
         />
-        <FiSettings />
       </div>
 
       {showAdminModal && (
