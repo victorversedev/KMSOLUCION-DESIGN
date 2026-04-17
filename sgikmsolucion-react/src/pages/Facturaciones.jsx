@@ -10,8 +10,7 @@ import "./Facturaciones.css";
 import SideMenu from "../menu/SideMenu";
 import TopBar from "../menu/TopBar";
 
-// Definimos las rutas base
-const BASE_URL = "https://kmsolucion.com/KMBD/public/api";
+const BASE_URL = "https://kmsolucion.com/KMBD/public/api/";
 const API_URL = `${BASE_URL}/facturas`;
 
 export default function Facturaciones() {
@@ -19,6 +18,20 @@ export default function Facturaciones() {
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedClients, setExpandedClients] = useState({});
   const csvInputRef = useRef(null); 
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [formEntry, setFormEntry] = useState({
+    cliente: "", 
+    folio: "", 
+    categoria: "", 
+    fecha: "",       
+    fecha_pago: "",  
+    monto: "", 
+    estado: ""
+  });
+
+  // --- UTILIDADES DE LIMPIEZA ---
 
   const getAuthHeader = () => {
     const token = localStorage.getItem("token");
@@ -30,14 +43,23 @@ export default function Facturaciones() {
     };
   };
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formEntry, setFormEntry] = useState({
-    cliente: "", folio: "", categoria: "", fecha: "", monto: "", estado: ""
-  });
+  const cleanDate = (dateStr) => {
+    if (!dateStr) return "";
+    return dateStr.split("T")[0];
+  };
+
+  // Función estrella: Elimina acentos, mayúsculas y espacios extra
+  const normalizeText = (text) => {
+    if (!text) return "GENERAL";
+    return text
+      .trim()
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  };
 
   const formatExcelDate = (dateString) => {
-    if (!dateString) return new Date().toISOString().split('T')[0];
+    if (!dateString) return null;
     const str = String(dateString).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
     const mxDateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -48,17 +70,22 @@ export default function Facturaciones() {
     return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : str;
   };
 
+  // --- ACCIONES API ---
+
   const fetchRecords = async () => {
     try {
       const response = await axios.get(API_URL, getAuthHeader());
       const grouped = response.data.reduce((acc, curr) => {
-        const clientName = curr.client_name.toUpperCase();
+        // Normalizamos cliente para que el agrupamiento visual sea perfecto
+        const clientName = normalizeText(curr.client_name);
         if (!acc[clientName]) acc[clientName] = { cliente: clientName, items: [] };
+        
         acc[clientName].items.push({
           id: curr.id,
           folio: curr.folio,
-          category: curr.category,
-          fecha: curr.billing_date,
+          category: normalizeText(curr.category), // Normalizamos categoría al mostrar
+          fecha: cleanDate(curr.billing_date),
+          fecha_pago: cleanDate(curr.payment_date),
           monto: parseFloat(curr.amount),
           estado: curr.status
         });
@@ -74,7 +101,6 @@ export default function Facturaciones() {
     fetchRecords();
   }, []);
 
-  // --- LÓGICA DE IMPORTACIÓN CON REPARTO AUTOMÁTICO ---
   const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -91,71 +117,78 @@ export default function Facturaciones() {
           const uploadPromises = validRows.flatMap(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
             const formattedDate = formatExcelDate(row.fecha);
-            const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
+            const formattedPaymentDate = row.fechapago ? formatExcelDate(row.fechapago) : null;
             
-            // 1. Lógica de Cartera Vencida (31 días)
+            // Datos normalizados antes de enviar a la DB
+            const cleanClient = normalizeText(row.cliente || "SIN CLIENTE");
+            const cleanCategory = normalizeText(row.categoria || row.category || "GENERAL");
+
+            let rawStatus = (row.estado || "").trim();
+            const lowerStatus = rawStatus.toLowerCase();
+            let finalStatus = rawStatus || "Pendiente";
+
+            if (lowerStatus === "enviada" || lowerStatus === "enviado") {
+              finalStatus = "Pendiente";
+            } else if (lowerStatus === "pagada" || lowerStatus === "pagado" || lowerStatus === "aprobado") {
+              finalStatus = "Pagada";
+            } else if (rawStatus === "") {
+              finalStatus = "Borrador";
+            }
+
             const invoiceDate = new Date(formattedDate);
-            const diffTime = Math.abs(today - invoiceDate);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
-            let finalStatus = row.estado || "Pendiente";
-            if (rawStatus === "pendiente" && diffDays >= 31) {
+            const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
+            if (finalStatus === "Pendiente" && diffDays >= 31) {
               finalStatus = "Cartera Vencida";
             }
 
-            // --- PROMESAS DE REPARTO ---
             const requests = [];
 
-            // A. Siempre registrar en Facturas
+            // 1. Factura
             requests.push(axios.post(API_URL, {
-              client_name: (row.cliente || "SIN CLIENTE").trim(),
+              client_name: cleanClient,
               folio: (row.folio || "S/N").trim(),
-              category: (row.categoria || row.category || "General").trim(),
+              category: cleanCategory,
               billing_date: formattedDate,
+              payment_date: formattedPaymentDate, 
               amount: parseFloat(cleanMonto),
               status: finalStatus
             }, getAuthHeader()));
 
-            // B. Si es Aprobado/Pagado -> Enviar a Ingresos
-            if (["aprobado", "aprobada", "pagado", "completado"].includes(rawStatus)) {
+            // 2. Cobros / CxC
+            if (finalStatus === "Pagada") {
               requests.push(axios.post(`${BASE_URL}/ingresos`, {
-                client_name: (row.cliente || "SIN CLIENTE").trim(),
+                client_name: cleanClient,
                 folio: (row.folio || "S/N").trim(),
-                category: (row.categoria || row.category || "General").trim(),
-                payment_date: formattedDate,
+                category: cleanCategory,
+                payment_date: formattedPaymentDate || formattedDate,
                 amount: parseFloat(cleanMonto),
                 status: "Ingreso"
               }, getAuthHeader()));
-            } 
-            // C. Si es Pendiente o Cartera Vencida -> Enviar a CxC
-            else {
+            } else {
               requests.push(axios.post(`${BASE_URL}/cxc`, {
-                client_name: (row.cliente || "SIN CLIENTE").trim(),
+                client_name: cleanClient,
                 folio: (row.folio || "S/N").trim(),
-                category: (row.categoria || row.category || "General").trim(),
+                category: cleanCategory,
                 due_date: formattedDate,
                 amount: parseFloat(cleanMonto),
                 status: finalStatus
               }, getAuthHeader()));
             }
-
             return requests;
           });
 
           await Promise.all(uploadPromises);
-          alert("¡Importación y reparto completado con éxito!");
+          alert("¡Importación exitosa y datos normalizados!");
           fetchRecords(); 
         } catch (error) {
-          console.error("Error en reparto:", error);
-          alert("Error al procesar el archivo. Revisa los datos.");
+          console.error("Error:", error);
+          alert("Error al procesar el archivo.");
         } finally {
           if(csvInputRef.current) csvInputRef.current.value = ""; 
         }
       }
     });
   };
-
-  // ... (Resto del componente se mantiene igual: handleEditClick, handleUpdate, Render, etc.)
 
   const handleEditClick = (e, item, clienteName) => {
     e.stopPropagation();
@@ -165,6 +198,7 @@ export default function Facturaciones() {
       folio: item.folio,
       categoria: item.category || "",
       fecha: item.fecha,
+      fecha_pago: item.fecha_pago || "", 
       monto: item.monto,
       estado: item.estado
     });
@@ -180,10 +214,11 @@ export default function Facturaciones() {
     e.preventDefault();
     try {
       await axios.put(`${API_URL}/${editingId}`, {
-        client_name: formEntry.cliente,
+        client_name: normalizeText(formEntry.cliente),
         folio: formEntry.folio,
-        category: formEntry.categoria,
+        category: normalizeText(formEntry.categoria),
         billing_date: formEntry.fecha,
+        payment_date: formEntry.fecha_pago || null, 
         amount: formEntry.monto,
         status: formEntry.estado
       }, getAuthHeader());
@@ -210,10 +245,11 @@ export default function Facturaciones() {
   };
 
   const filteredData = data.filter((group) => {
-    const matchesCliente = group.cliente.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesCliente = group.cliente.toLowerCase().includes(term);
     const matchesItems = group.items.some(item => 
-      (item.folio && item.folio.toString().toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
+      (item.folio && item.folio.toString().toLowerCase().includes(term)) ||
+      (item.category && item.category.toLowerCase().includes(term))
     );
     return matchesCliente || matchesItems;
   });
@@ -246,7 +282,7 @@ export default function Facturaciones() {
                     <th style={{ width: "50px" }}></th>
                     <th>Folio / Cliente</th> 
                     <th>Categoría</th>
-                    <th>Fecha</th>
+                    <th>Fechas (Emisión / Pago)</th>
                     <th>Monto</th>
                     <th>Estado</th>
                     <th style={{ width: "120px" }}>Acciones</th>
@@ -268,7 +304,16 @@ export default function Facturaciones() {
                           <td></td>
                           <td className="enlace-name">{item.folio}</td>
                           <td style={{ color: "#666", fontSize: "0.9rem" }}>{item.category}</td>
-                          <td>{item.fecha}</td>
+                          <td>
+                            <div title="Fecha de Facturación" style={{ fontWeight: "500" }}>{item.fecha}</div>
+                            {item.fecha_pago ? (
+                                <div title="Fecha de Pago" style={{ fontSize: "0.75rem", color: "#2e7d32", borderTop: "1px solid #eee", marginTop: "2px" }}>
+                                  Pagado: {item.fecha_pago}
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: "0.75rem", color: "#d32f2f" }}>Sin pago</div>
+                            )}
+                          </td>
                           <td style={{ fontWeight: "600" }}>${item.monto.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
                           <td><span className={`status-pill ${item.estado.toLowerCase().replace(/\s+/g, '-')}`}>{item.estado}</span></td>
                           <td className="actions">
@@ -302,9 +347,15 @@ export default function Facturaciones() {
                 <label>Categoría</label>
                 <input type="text" name="categoria" value={formEntry.categoria} onChange={handleInputChange} />
               </div>
-              <div className="form-group">
-                <label>Fecha</label>
-                <input type="date" name="fecha" value={formEntry.fecha} onChange={handleInputChange} />
+              <div className="form-row" style={{ display: "flex", gap: "15px" }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                    <label>Fecha de Factura</label>
+                    <input type="date" name="fecha" value={formEntry.fecha} onChange={handleInputChange} />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                    <label>Fecha de Pago</label>
+                    <input type="date" name="fecha_pago" value={formEntry.fecha_pago} onChange={handleInputChange} />
+                </div>
               </div>
               <div className="form-group">
                 <label>Monto</label>
@@ -313,10 +364,11 @@ export default function Facturaciones() {
               <div className="form-group">
                 <label>Estado</label>
                 <select name="estado" value={formEntry.estado} onChange={handleInputChange}>
-                  <option value="Aprobado">Aprobado</option>
+                  <option value="Pagada">Pagada</option>
                   <option value="Pendiente">Pendiente</option>
+                  <option value="Cartera Vencida">Cartera Vencida</option>
                   <option value="Cancelado">Cancelado</option>
-                  <option value="Pagado">Pagado</option>
+                  <option value="Borrador">Borrador</option>
                 </select>
               </div>
               <div className="form-actions">
