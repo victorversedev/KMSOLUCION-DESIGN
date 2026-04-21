@@ -239,7 +239,7 @@ export default function DashboardKMS() {
   };
 
   const renderPanel = (panel) => {
-    const titulos = { facturas: 'Facturación', ingresos: 'Ingresos Cobrados', cartera: 'Cuentas por Cobrar' };
+    const titulos = { facturas: 'Facturación', ingresos: 'Ingreso Semanal', cartera: 'Cuentas por Cobrar' };
     const rawKeys = { facturas: 'facturasRaw', ingresos: 'ingresosRaw', cartera: 'cobrarRaw' };
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
