@@ -43,7 +43,6 @@ export default function Facturaciones() {
     };
   };
 
-  // Función corregida para que no rompa si la fecha es null
   const cleanDate = (dateStr) => {
     if (!dateStr || dateStr === "null" || dateStr === undefined) return "";
     return dateStr.split("T")[0];
@@ -75,7 +74,6 @@ export default function Facturaciones() {
   const fetchRecords = async () => {
     try {
       const response = await axios.get(API_URL, getAuthHeader());
-      // Validamos que response.data sea un array antes de procesar
       const records = Array.isArray(response.data) ? response.data : [];
       
       const grouped = records.reduce((acc, curr) => {
@@ -87,7 +85,7 @@ export default function Facturaciones() {
           folio: curr.folio || "S/N",
           category: normalizeText(curr.category),
           fecha: cleanDate(curr.billing_date),
-          fecha_pago: cleanDate(curr.payment_date), // Si no existe, devuelve ""
+          fecha_pago: cleanDate(curr.payment_date), 
           monto: parseFloat(curr.amount || 0),
           estado: curr.status || "Pendiente"
         });
@@ -96,7 +94,7 @@ export default function Facturaciones() {
       setData(Object.values(grouped));
     } catch (error) {
       console.error("Error cargando datos:", error);
-      setData([]); // Evita que la app truene si hay error de red
+      setData([]);
     }
   };
 
@@ -104,7 +102,7 @@ export default function Facturaciones() {
     fetchRecords();
   }, []);
 
- const handleCSVUpload = (e) => {
+  const handleCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -116,50 +114,72 @@ export default function Facturaciones() {
         try {
           const validRows = results.data.filter(row => row.cliente || row.folio);
           const today = new Date();
+          const allRequests = [];
 
-          const allRequests = validRows.map(row => {
+          validRows.forEach(row => {
             const cleanMonto = row.monto ? String(row.monto).replace(/[^0-9.-]+/g, "") : 0;
+            const amount = parseFloat(cleanMonto);
             const rawStatus = (row.estado || "Pendiente").trim().toLowerCase();
-            
-            let targetEndpoint = "";
-            let finalStatus = "";
-            let payload = {
-              client_name: normalizeText(row.cliente || "SIN CLIENTE"),
-              folio: (row.folio || "S/N").trim(),
-              category: normalizeText(row.categoria || "GENERAL"),
-              amount: parseFloat(cleanMonto)
+            const clientName = normalizeText(row.cliente || "SIN CLIENTE");
+            const folio = (row.folio || "S/N").trim();
+            const category = normalizeText(row.categoria || "GENERAL");
+            const billingDate = formatExcelDate(row.fecha);
+
+            // 1. Datos para el Registro General (FACTURAS)
+            let payloadFactura = {
+              client_name: clientName,
+              folio: folio,
+              category: category,
+              amount: amount,
+              billing_date: billingDate
             };
 
-            // --- LÓGICA DE REPARTO ---
-            // 1. Si está pagado o aprobado -> Va a INGRESOS
-            if (["pagada", "pagado", "aprobado", "ingreso"].includes(rawStatus)) {
-              targetEndpoint = `${BASE_URL}/ingresos`;
-              finalStatus = "Ingreso";
-              payload.payment_date = formatExcelDate(row.fechapag || row.fecha);
-            } 
-            // 2. Si es pendiente o cualquier otro -> Va a CxC
-            else {
-              targetEndpoint = `${BASE_URL}/cxc`;
-              const dueDate = formatExcelDate(row.fecha || row.fechaven);
-              payload.due_date = dueDate;
+            // 2. Lógica para el Reparto (INGRESOS o CXC)
+            let targetRepartoEndpoint = "";
+            let payloadReparto = {
+              client_name: clientName,
+              folio: folio,
+              category: category,
+              amount: amount
+            };
 
-              // Calcular si es Cartera Vencida (más de 30 días)
+            if (["pagada", "pagado", "aprobado", "ingreso"].includes(rawStatus)) {
+              // --- VA A INGRESOS ---
+              targetRepartoEndpoint = `${BASE_URL}/ingresos`;
+              const paymentDate = formatExcelDate(row.fechapag || row.fecha);
+              
+              payloadFactura.status = "Pagada";
+              payloadFactura.payment_date = paymentDate;
+
+              payloadReparto.status = "Ingreso";
+              payloadReparto.payment_date = paymentDate;
+            } else {
+              // --- VA A CXC ---
+              targetRepartoEndpoint = `${BASE_URL}/cxc`;
+              const dueDate = formatExcelDate(row.fecha || row.fechaven);
+              
+              // Cálculo de Cartera Vencida
               const invoiceDate = new Date(dueDate);
               const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
-              finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
+              const finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
+
+              payloadFactura.status = finalStatus;
+
+              payloadReparto.status = finalStatus;
+              payloadReparto.due_date = dueDate;
             }
 
-            payload.status = finalStatus;
-
-            return axios.post(targetEndpoint, payload, getAuthHeader());
+            // Agregamos ambas peticiones al array de promesas
+            allRequests.push(axios.post(API_URL, payloadFactura, getAuthHeader()));
+            allRequests.push(axios.post(targetRepartoEndpoint, payloadReparto, getAuthHeader()));
           });
 
           await Promise.all(allRequests);
-          alert("¡Reparto completado! Las facturas se enviaron a Ingresos o CxC según su estado.");
+          alert("¡Carga exitosa! Datos guardados en Facturas y repartidos correctamente.");
           fetchRecords(); 
         } catch (error) {
           console.error("Error en el reparto:", error.response?.data || error.message);
-          alert("Error al repartir los datos. Revisa la consola.");
+          alert("Error al procesar los datos. Revisa la consola.");
         } finally {
           if(csvInputRef.current) csvInputRef.current.value = ""; 
         }
@@ -175,7 +195,7 @@ export default function Facturaciones() {
       folio: item.folio,
       categoria: item.category,
       fecha: item.fecha,
-      fecha_pago: item.fecha_pago || "", // Evita que el input date reciba null
+      fecha_pago: item.fecha_pago || "", 
       monto: item.monto,
       estado: item.estado
     });
@@ -194,7 +214,6 @@ export default function Facturaciones() {
         status: formEntry.estado
       };
 
-      // Solo enviar fecha_pago si tiene valor
       if (formEntry.fecha_pago && formEntry.fecha_pago.trim() !== "") {
         payload.payment_date = formEntry.fecha_pago;
       }
