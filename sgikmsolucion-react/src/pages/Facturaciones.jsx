@@ -134,7 +134,7 @@ export default function Facturaciones() {
               billing_date: billingDate
             };
 
-            // 2. Lógica para el Reparto (INGRESOS o CXC)
+            // 2. Lógica para el Reparto (INGRESOS, CXC o COTIZACIONES)
             let targetRepartoEndpoint = "";
             let payloadReparto = {
               client_name: clientName,
@@ -143,8 +143,15 @@ export default function Facturaciones() {
               amount: amount
             };
 
-            if (["pagada", "pagado", "aprobado", "ingreso"].includes(rawStatus)) {
-              // --- VA A INGRESOS ---
+            // NUEVA CONDICIÓN: COTIZACIÓN
+            if (rawStatus.includes("cotizacion") || rawStatus.includes("cotización")) {
+              targetRepartoEndpoint = `${BASE_URL}/cotizaciones`;
+              payloadFactura.status = "Cotización";
+              payloadReparto.status = "Cotización";
+              payloadReparto.date = billingDate; // Opcional: ajustar según campos de tu tabla cotizaciones
+            } 
+            // CONDICIÓN: PAGADOS (INGRESOS)
+            else if (["pagada", "pagado", "aprobado", "ingreso"].includes(rawStatus)) {
               targetRepartoEndpoint = `${BASE_URL}/ingresos`;
               const paymentDate = formatExcelDate(row.fechapag || row.fecha);
               
@@ -153,33 +160,33 @@ export default function Facturaciones() {
 
               payloadReparto.status = "Ingreso";
               payloadReparto.payment_date = paymentDate;
-            } else {
-              // --- VA A CXC ---
+            } 
+            // CONDICIÓN: PENDIENTES (CXC)
+            else {
               targetRepartoEndpoint = `${BASE_URL}/cxc`;
               const dueDate = formatExcelDate(row.fecha || row.fechaven);
               
-              // Cálculo de Cartera Vencida
               const invoiceDate = new Date(dueDate);
               const diffDays = Math.ceil(Math.abs(today - invoiceDate) / (1000 * 60 * 60 * 24));
               const finalStatus = diffDays >= 31 ? "Cartera Vencida" : "Pendiente";
 
               payloadFactura.status = finalStatus;
-
               payloadReparto.status = finalStatus;
               payloadReparto.due_date = dueDate;
             }
 
-            // Agregamos ambas peticiones al array de promesas
+            // Inserción en Facturas
             allRequests.push(axios.post(API_URL, payloadFactura, getAuthHeader()));
+            // Inserción en Módulo de Reparto
             allRequests.push(axios.post(targetRepartoEndpoint, payloadReparto, getAuthHeader()));
           });
 
           await Promise.all(allRequests);
-          alert("¡Carga exitosa! Datos guardados en Facturas y repartidos correctamente.");
+          alert("¡Éxito! Datos guardados en Facturas y repartidos a su módulo correspondiente.");
           fetchRecords(); 
         } catch (error) {
-          console.error("Error en el reparto:", error.response?.data || error.message);
-          alert("Error al procesar los datos. Revisa la consola.");
+          console.error("Error en el proceso:", error.response?.data || error.message);
+          alert("Error al procesar los datos.");
         } finally {
           if(csvInputRef.current) csvInputRef.current.value = ""; 
         }
@@ -187,13 +194,15 @@ export default function Facturaciones() {
     });
   };
 
+  // ... Resto de funciones (handleEditClick, handleUpdate, handleDelete, toggleClient) se mantienen igual
+
   const handleEditClick = (e, item, clienteName) => {
     e.stopPropagation();
     setEditingId(item.id);
     setFormEntry({
       cliente: clienteName,
       folio: item.folio,
-      categoria: item.category,
+      category: item.category,
       fecha: item.fecha,
       fecha_pago: item.fecha_pago || "", 
       monto: item.monto,
@@ -360,6 +369,7 @@ export default function Facturaciones() {
                   <option value="Cartera Vencida">Cartera Vencida</option>
                   <option value="Cancelado">Cancelado</option>
                   <option value="Borrador">Borrador</option>
+                  <option value="Cotización">Cotización</option>
                 </select>
               </div>
               <div className="form-actions">
